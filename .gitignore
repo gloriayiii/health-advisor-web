@@ -1,0 +1,21 @@
+node_modules
+
+# datasets
+data/
+*.dcm
+*.nii
+*.nii.gz
+*.zip
+
+# python
+__pycache__/
+*.pyc
+
+# env
+venv/
+.env
+
+.next/
+node_modules/
+.env.local
+dist/
