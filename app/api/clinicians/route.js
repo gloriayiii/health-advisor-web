@@ -1,20 +1,27 @@
-import { NextResponse } from 'next/server'
-import { supabase, supabaseAdmin } from '../../../lib/supabase'
+import { requireClinician } from '../../../lib/auth'
+import { apiError, apiSuccess } from '../../../lib/apiResponse'
 
-const client = supabaseAdmin || supabase
+export async function GET(request) {
+  const auth = await requireClinician(request)
+  if (auth.error) return auth.error
 
-export async function GET() {
-  const { data, error } = await client.from('clinicians').select('*')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  const { data, error } = await auth.client.from('clinicians').select('*')
+  if (error) return apiError(error, 500)
+  return apiSuccess(data || [])
 }
 
 export async function POST(request) {
+  const auth = await requireClinician(request)
+  if (auth.error) return auth.error
+
   const body = await request.json()
-  if (!body || !body.name || !body.email) {
-    return NextResponse.json({ error: 'name and email required' }, { status: 400 })
-  }
-  const { data, error } = await client.from('clinicians').insert([body]).select().single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { status: 201 })
+  if (!body?.name || !body?.email) return apiError('name and email required', 400)
+
+  const { data, error } = await auth.client
+    .from('clinicians')
+    .insert([body])
+    .select()
+    .single()
+  if (error) return apiError(error, 500)
+  return apiSuccess(data, 201)
 }

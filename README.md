@@ -38,11 +38,20 @@ A Next.js-based web application for clinicians to review and modify AI-generated
 
 4. Open your browser and navigate to `http://localhost:3000`
 
-### Demo Credentials
+### Shared Supabase Setup
 
-For testing purposes, use these credentials:
-- **Username**: `doctor`
-- **Password**: `password`
+The portal and patient app must use the same Supabase project.
+
+1. Run `supabase/schema.sql`.
+2. Run `supabase/integration-schema.sql`.
+3. Create clinician and patient accounts with Supabase Auth.
+4. Set `clinicians.auth_user_id` to the clinician Auth user UUID.
+5. Confirm each patient account has the correct `users.portal_patient_id`.
+
+Patient accounts are linked automatically by matching the Supabase Auth email
+to the portal patient email. Enable Supabase email confirmation so users must
+prove ownership of that address. The UUID link is then used for all reads and
+writes.
 
 ## Project Structure
 
@@ -56,7 +65,8 @@ For testing purposes, use these credentials:
 ├── components/
 │   ├── Login.js          # Authentication component
 │   ├── Dashboard.js      # Main dashboard with patient overview
-│   ├── PatientReview.js  # Individual patient case review
+│   ├── PatientReview.js  # Patient review workflow controller
+│   ├── patientReview/    # Summary, recommendation, questionnaire, and mapping modules
 │   └── styles/
 │       ├── Login.css     # Login component styles
 │       ├── Dashboard.css # Dashboard component styles
@@ -83,8 +93,17 @@ For testing purposes, use these credentials:
 
 ### Authentication
 - Secure doctor login system
-- Session management with localStorage
+- Supabase Auth sessions stored in HTTP-only cookies
 - Role-based access control
+
+## API Responses
+
+JSON endpoints use `{ "success": true, "data": {}, "error": null }`. Errors use
+`{ "success": false, "data": null, "error": "message" }`.
+
+Patient resources use `/api/patients`; `/api/users` is retired. Recommendation
+creation and Ollama generation are consolidated in `POST /api/recommendations`.
+Generation requests stream SSE when `{ "generate": true }` is provided.
 
 ## Technology Stack
 
@@ -114,6 +133,17 @@ For testing purposes, use these credentials:
 - `npm run build`: Build for production
 - `npm run start`: Start production server
 - `npm run lint`: Run ESLint
+- `npm test`: Run questionnaire contract, delivery, clinician review, and responsive tests
+
+### Reliability
+
+API responses include an `x-request-id` header. Server logs are structured JSON
+and intentionally exclude patient demographics, medical details, questionnaire
+answers, prompts, and recommendation text.
+
+The test suite covers partial questionnaire data, invalid/duplicate questions,
+notification-server outages, newest-first clinician review, and phone, tablet,
+and desktop layout contracts.
 
 ### Code Style
 

@@ -166,6 +166,19 @@
   overflow-y: auto;
 }
 
+.dashboard-empty-state,
+.dashboard-api-error {
+  padding: 1.5rem;
+  color: #64748b;
+  font-size: 0.925rem;
+}
+
+.dashboard-api-error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+}
+
 .dashboard-patient-card {
   padding: 1.5rem;
   border-bottom: 1px solid #f1f5f9;
@@ -254,6 +267,17 @@
 
 .dashboard-action-button.primary:hover {
   background: #2563eb;
+}
+
+.dashboard-action-button.danger {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+.dashboard-action-button.danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
 }
 
 .dashboard-patient-actions {

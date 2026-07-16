@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { requestJson } from '@/lib/apiClient';
 import { 
   LogOut, 
   User, 
@@ -11,78 +12,48 @@ import {
   AlertCircle, 
   CheckCircle,
   Eye,
-  Edit3
+  Trash2
 } from 'lucide-react';
 import './styles/Dashboard.css';
-
-// Mock data for patients
-const mockPatients = [
-  {
-    id: '1',
-    name: 'John Doe',
-    age: 45,
-    gender: 'Male',
-    condition: 'Hypertension',
-    status: 'pending',
-    requestTime: '2024-01-15 10:30',
-    urgency: 'normal'
-  },
-  {
-    id: '2',
-    name: 'Sarah Wilson',
-    age: 32,
-    gender: 'Female',
-    condition: 'Diabetes Type 2',
-    status: 'urgent',
-    requestTime: '2024-01-15 09:15',
-    urgency: 'high'
-  },
-  {
-    id: '3',
-    name: 'Michael Brown',
-    age: 58,
-    gender: 'Male',
-    condition: 'Cardiovascular Disease',
-    status: 'reviewed',
-    requestTime: '2024-01-15 08:45',
-    urgency: 'normal'
-  },
-  {
-    id: '4',
-    name: 'Emily Davis',
-    age: 28,
-    gender: 'Female',
-    condition: 'Asthma',
-    status: 'pending',
-    requestTime: '2024-01-15 11:20',
-    urgency: 'normal'
-  }
-];
 
 function Dashboard() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const [patients, setPatients] = useState(mockPatients);
+  const [patients, setPatients] = useState([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [patientsError, setPatientsError] = useState('');
 
   useEffect(() => {
     let mounted = true
+    const mapPatient = (p) => {
+      const metadata = p.metadata || p.meta || {}
+      return {
+        id: p.id,
+        name: p.name,
+        age: p.dob ? new Date().getFullYear() - new Date(p.dob).getFullYear() : metadata.age || 0,
+        gender: p.gender || metadata.gender || 'Unknown',
+        condition: metadata.condition || metadata.primaryCondition || p.condition || '—',
+        status: metadata.status || p.status || 'pending',
+        urgency: metadata.urgency || p.urgency || 'normal',
+        requestTime: p.created_at || ''
+      }
+    }
+
     async function load() {
+      setLoadingPatients(true)
+      setPatientsError('')
       try {
-        const res = await fetch('/api/users')
-        if (!res.ok) throw new Error('Failed to load')
-        const data = await res.json()
-        if (mounted && Array.isArray(data) && data.length) setPatients(data.map(p => ({
-          id: p.id,
-          name: p.name,
-          age: p.dob ? new Date().getFullYear() - new Date(p.dob).getFullYear() : 0,
-          gender: p.gender || 'Unknown',
-          condition: p.condition || '—',
-          status: p.status || 'pending',
-          requestTime: p.created_at || ''
-        })))
+        const data = await requestJson('/api/patients')
+        const dbPatients = data.patients || []
+        if (mounted) setPatients(dbPatients.map(mapPatient))
       } catch (err) {
-        // keep mock data on error
         console.warn('Could not fetch patients', err)
+        if (mounted) {
+          setPatients([])
+          setPatientsError('Could not connect to the patient database. Check Supabase settings and restart the portal.')
+        }
+      } finally {
+        if (mounted) setLoadingPatients(false)
       }
     }
     load()
@@ -96,6 +67,22 @@ function Dashboard() {
   const handleViewPatient = (patientId) => {
     router.push(`/patient/${patientId}`);
   };
+
+  const handleDeletePatient = async (patientId, patientName) => {
+    const confirmed = window.confirm(`Delete patient ${patientName}? This cannot be undone.`)
+    if (!confirmed) return
+
+    const previous = patients
+    setPatients((prev) => prev.filter((patient) => patient.id !== patientId))
+
+    try {
+      await requestJson(`/api/patients/${patientId}`, { method: 'DELETE' })
+    } catch (err) {
+      console.error('Delete failed', err)
+      setPatients(previous)
+      alert('Could not delete patient. Please try again.')
+    }
+  }
 
   const getStatusIcon = (status) => {
     switch(status) {
@@ -195,8 +182,18 @@ function Dashboard() {
           <div className="dashboard-section-header">
             <h2 className="dashboard-section-title">Patient Cases</h2>
           </div>
-          <div className="dashboard-patient-list">
-            {patients.map((patient) => (
+          {patientsError && (
+            <div className="dashboard-api-error">
+              {patientsError}
+            </div>
+          )}
+          {loadingPatients ? (
+            <div className="dashboard-empty-state">Loading patients from database...</div>
+          ) : patients.length === 0 && !patientsError ? (
+            <div className="dashboard-empty-state">No patients found in the connected database.</div>
+          ) : (
+            <div className="dashboard-patient-list">
+              {patients.map((patient) => (
               <div key={patient.id} className="dashboard-patient-card">
                 <div className="dashboard-patient-info">
                   <h3 className="dashboard-patient-name">{patient.name}</h3>
@@ -221,17 +218,19 @@ function Dashboard() {
                       <Eye size={16} />
                       Review
                     </button>
-                    {patient.status === 'pending' && (
-                      <button className="dashboard-action-button primary">
-                        <Edit3 size={16} />
-                        Edit
-                      </button>
-                    )}
+                    <button
+                      className="dashboard-action-button danger"
+                      onClick={() => handleDeletePatient(patient.id, patient.name)}
+                    >
+                      <Trash2 size={16} />
+                      Delete
+                    </button>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     </div>

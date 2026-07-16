@@ -18,4 +18,8 @@ venv/
 .next/
 node_modules/
 .env.local
+.env.local.example
 dist/
+
+# database
+*.sql

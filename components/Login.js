@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, Lock, AlertCircle } from 'lucide-react';
+import { Mail, Lock, AlertCircle } from 'lucide-react';
 import './styles/Login.css';
 
 function Login() {
   const [credentials, setCredentials] = useState({
-    username: '',
+    email: '',
     password: ''
   });
   const [error, setError] = useState('');
@@ -52,17 +52,17 @@ function Login() {
           )}
 
           <div className="form-group">
-            <label className="input-label">Username</label>
+            <label className="input-label">Email</label>
             <div className="input-container">
               <div className="input-icon">
-                <User size={18} />
+                <Mail size={18} />
               </div>
               <input
-                type="text"
-                name="username"
-                value={credentials.username}
+                type="email"
+                name="email"
+                value={credentials.email}
                 onChange={handleChange}
-                placeholder="Enter username"
+                placeholder="Enter clinician email"
                 className="input"
                 required
               />
@@ -91,12 +91,6 @@ function Login() {
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-
-        <div className="demo-credentials">
-          <div className="demo-title">Demo Credentials</div>
-          <div className="demo-text">Username: doctor</div>
-          <div className="demo-text">Password: password</div>
-        </div>
       </div>
     </div>
   );

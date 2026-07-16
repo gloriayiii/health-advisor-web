@@ -1,87 +1,137 @@
-import { NextResponse } from 'next/server';
+import { requireClinician } from '../../../../lib/auth'
+import { apiError, apiSuccess } from '../../../../lib/apiResponse'
+import { normalizeQuestionnaire } from '../../../../lib/medicalContext'
+import { pushQuestionnaireToExternalServer } from '../../../../lib/questionnaireDelivery'
+import { validateQuestionnaire } from '../../../../lib/questionnaireSchema'
+import { getRequestId, structuredLog } from '../../../../lib/logger'
 
-// Mock patient database (same as above)
-const patients = [
-  {
-    id: '1',
-    name: 'John Doe',
-    age: 45,
-    gender: 'Male',
-    condition: 'Hypertension',
-    status: 'pending',
-    requestTime: '2024-01-15 10:30',
-    urgency: 'normal',
-    medicalRecord: 'MR-2024-001',
-    symptoms: 'Elevated blood pressure readings over the past 3 months, occasional headaches',
-    medicalHistory: 'Family history of hypertension, non-smoker, moderate alcohol consumption',
-    currentMedications: 'None currently',
-    allergies: 'None known',
-    vitalSigns: {
-      bloodPressure: '150/95 mmHg',
-      heartRate: '78 bpm',
-      temperature: '98.6°F',
-      weight: '180 lbs'
-    }
+async function normalizePatientPatch(client, clinician, existing, patch) {
+  if (!patch.metadata) return patch
+
+  const metadata = {
+    ...(existing?.metadata || {}),
+    ...patch.metadata
   }
-];
+
+  if (metadata.questionnaire) {
+    const normalizedQuestionnaire = normalizeQuestionnaire({
+      ...metadata.questionnaire,
+      id: metadata.questionnaire.id || crypto.randomUUID()
+    })
+    const validation = validateQuestionnaire(normalizedQuestionnaire)
+    if (normalizedQuestionnaire.status === 'sent' && !validation.valid) {
+      const error = new Error(validation.error)
+      error.code = 'INVALID_QUESTIONNAIRE'
+      throw error
+    }
+
+    const baseRecord = {
+      id: normalizedQuestionnaire.id,
+      patient_id: existing.id,
+      clinician_id: patch.clinician_id || existing.clinician_id || clinician.id,
+      schema_version: normalizedQuestionnaire.schemaVersion,
+      status: normalizedQuestionnaire.status,
+      payload: normalizedQuestionnaire,
+      sent_at: normalizedQuestionnaire.sentAt,
+      delivery_status: normalizedQuestionnaire.status === 'sent' ? 'available' : 'not_attempted',
+      delivery_error: null
+    }
+    const { error: questionnaireError } = await client
+      .from('questionnaires')
+      .upsert(baseRecord)
+    if (questionnaireError) throw questionnaireError
+
+    const delivery = await pushQuestionnaireToExternalServer(
+      { ...existing, ...patch, metadata },
+      normalizedQuestionnaire
+    )
+    const deliveryStatus = delivery.pushResult.attempted
+      ? delivery.pushResult.status
+      : normalizedQuestionnaire.status === 'sent'
+        ? 'available'
+        : 'not_attempted'
+    const deliveredQuestionnaire = {
+      ...delivery.questionnaire,
+      delivery: {
+        ...delivery.questionnaire.delivery,
+        externalServerStatus: deliveryStatus
+      }
+    }
+    metadata.questionnaire = deliveredQuestionnaire
+    metadata.questionnairePushResult = delivery.pushResult
+
+    const { error: deliveryError } = await client
+      .from('questionnaires')
+      .update({
+        payload: deliveredQuestionnaire,
+        delivery_status: deliveryStatus,
+        delivery_error: deliveryStatus === 'failed' ? delivery.pushResult.response : null
+      })
+      .eq('id', normalizedQuestionnaire.id)
+    if (deliveryError) throw deliveryError
+  }
+
+  return { ...patch, metadata }
+}
 
 export async function GET(request, { params }) {
   try {
-    const { id } = params;
-    
-    const patient = patients.find(p => p.id === id);
-    
-    if (!patient) {
-      return NextResponse.json(
-        { success: false, message: 'Patient not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      patient
-    });
-
+    const auth = await requireClinician(request)
+    if (auth.error) return auth.error
+    const { client } = auth
+    const { data, error } = await client.from('patients').select('*').eq('id', params.id).single()
+    if (error) return apiError(error, 404)
+    return apiSuccess({ patient: data })
   } catch (error) {
-    return NextResponse.json(
-      { success: false, message: 'Failed to fetch patient' },
-      { status: 500 }
-    );
+    return apiError(error, 500)
   }
 }
 
 export async function PUT(request, { params }) {
+  const requestId = getRequestId(request)
   try {
-    const { id } = params;
-    const updateData = await request.json();
-    
-    // In production, you would:
-    // 1. Validate the data
-    // 2. Update in database
-    // 3. Log the changes
-    // 4. Send notifications
+    const auth = await requireClinician(request)
+    if (auth.error) return auth.error
+    const { client, clinician } = auth
+    const patch = await request.json()
+    const { data: existing, error: existingError } = await client
+      .from('patients')
+      .select('*')
+      .eq('id', params.id)
+      .single()
 
-    const patientIndex = patients.findIndex(p => p.id === id);
-    
-    if (patientIndex === -1) {
-      return NextResponse.json(
-        { success: false, message: 'Patient not found' },
-        { status: 404 }
-      );
+    if (existingError) {
+      return apiError(existingError, 404)
     }
 
-    patients[patientIndex] = { ...patients[patientIndex], ...updateData };
+    const normalizedPatch = await normalizePatientPatch(client, clinician, existing, patch)
+    const { data, error } = await client
+      .from('patients')
+      .update(normalizedPatch)
+      .eq('id', params.id)
+      .select()
+      .single()
 
-    return NextResponse.json({
-      success: true,
-      patient: patients[patientIndex]
-    });
-
+    if (error) return apiError(error, 500)
+    structuredLog('info', 'patient.updated', {
+      requestId,
+      questionnaireIncluded: Boolean(patch.metadata?.questionnaire)
+    })
+    return apiSuccess({ patient: data })
   } catch (error) {
-    return NextResponse.json(
-      { success: false, message: 'Failed to update patient' },
-      { status: 500 }
-    );
+    structuredLog('error', 'patient.update.failed', {
+      requestId,
+      error: error.message
+    })
+    return apiError(error, error.code === 'INVALID_QUESTIONNAIRE' ? 400 : 500)
   }
+}
+
+export async function DELETE(request, { params }) {
+  const auth = await requireClinician(request)
+  if (auth.error) return auth.error
+
+  const { error } = await auth.client.from('patients').delete().eq('id', params.id)
+  if (error) return apiError(error, 500)
+  return apiSuccess()
 }

@@ -1,98 +1,60 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react'
 
-const AuthContext = createContext();
+const AuthContext = createContext()
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used within an AuthProvider')
+  return context
+}
 
 export const AuthProvider = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Check authentication status in local storage
-    const savedAuth = localStorage.getItem('health-advisor-auth');
-    if (savedAuth) {
-      try {
-        const authData = JSON.parse(savedAuth);
-        setIsAuthenticated(true);
-        setUser(authData.user);
-      } catch (error) {
-        console.error('Failed to parse auth data:', error);
-        localStorage.removeItem('health-advisor-auth');
-      }
-    }
-    setLoading(false);
-  }, []);
+    fetch('/api/auth/session')
+      .then(async (response) => {
+        if (!response.ok) return null
+        const payload = await response.json()
+        return payload.data?.user || null
+      })
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false))
+  }, [])
 
-  const login = async (credentials) => {
-    try {
-      // Simulate API call
-      const response = await new Promise((resolve) => {
-        setTimeout(() => {
-          // Simulate doctor login verification
-          if (credentials.username === 'doctor' && credentials.password === 'password') {
-            resolve({
-              success: true,
-              user: {
-                id: '1',
-                name: 'Dr. Smith',
-                role: 'doctor',
-                department: 'Internal Medicine',
-                email: 'doctor@hospital.com'
-              }
-            });
-          } else {
-            resolve({ success: false, message: 'Invalid username or password' });
-          }
-        }, 1000);
-      });
+  const login = async ({ email, password }) => {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    })
+    const payload = await response.json()
+    if (!response.ok) return { success: false, message: payload.error || 'Login failed' }
 
-      if (response.success) {
-        setIsAuthenticated(true);
-        setUser(response.user);
-        localStorage.setItem('health-advisor-auth', JSON.stringify({
-          user: response.user,
-          timestamp: Date.now()
-        }));
-        return { success: true };
-      } else {
-        return { success: false, message: response.message };
-      }
-    } catch (error) {
-      return { success: false, message: 'Login failed, please try again' };
-    }
-  };
+    setUser(payload.data.user)
+    return { success: true }
+  }
 
-  const logout = () => {
-    setIsAuthenticated(false);
-    setUser(null);
-    localStorage.removeItem('health-advisor-auth');
-  };
-
-  const value = {
-    isAuthenticated,
-    user,
-    loading,
-    login,
-    logout
-  };
-
-  if (loading) {
-    return <div>Loading...</div>;
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null)
+    setUser(null)
   }
 
   return (
-    <AuthContext.Provider value={value}>
-      {children}
+    <AuthContext.Provider
+      value={{
+        isAuthenticated: Boolean(user),
+        user,
+        loading,
+        login,
+        logout
+      }}
+    >
+      {loading ? <div>Loading...</div> : children}
     </AuthContext.Provider>
-  );
-};
+  )
+}
